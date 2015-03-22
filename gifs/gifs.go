@@ -56,6 +56,46 @@ func verifyGif(r io.Reader) ([]byte, error) {
 	return data, err
 }
 
+func storeGif(db *bolt.DB, ns, uuid, content []byte) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		rootBucket := tx.Bucket([]byte(root))
+
+		namespacesBucket, err := rootBucket.CreateBucketIfNotExists([]byte(namespacesBucketName))
+		if err != nil {
+			return err
+		}
+
+		bucketForNamespace, err := rootBucket.CreateBucketIfNotExists(ns)
+		if err != nil {
+			return err
+		}
+		if err = rootBucket.Put(uuid, content); err != nil {
+			return err
+		}
+		if err = bucketForNamespace.Put(uuid, []byte("{}")); err != nil {
+			return err
+		}
+		if err = namespacesBucket.Put(ns, []byte("{}")); err != nil {
+			return err
+		}
+
+		return nil
+	})
+}
+
+func retrieveAndVerify(r io.Reader) ([]byte, error) {
+	src, err := ioutil.ReadAll(r)
+	if err != nil {
+		return []byte{}, err
+	}
+	resp, err := http.Get(string(src))
+	if err != nil {
+		return []byte{}, err
+	}
+	defer resp.Body.Close()
+	return verifyGif(resp.Body)
+}
+
 func errorHandler(err error, c web.C, w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusServiceUnavailable)
 	fmt.Fprintf(w, "Looks like something be misbehavin!")
@@ -98,7 +138,7 @@ func nRandomIndiciesFor(db *bolt.DB, namespace []byte, num int) []int {
 	index := 0
 	retries := 0
 	for {
-		if retries > 100 || index == len(indices) {
+		if retries > 100 || index >= len(indices) {
 			break
 		}
 		n := rand.Intn(namespaceSize)
@@ -116,8 +156,8 @@ func nRandomIndiciesFor(db *bolt.DB, namespace []byte, num int) []int {
 }
 
 func findRandomGifs(db *bolt.DB, namespace []byte, num int) ([]string, error) {
-	uuids := make([]string, num)
 	indices := nRandomIndiciesFor(db, namespace, num)
+	uuids := make([]string, len(indices))
 
 	err := db.View(func(tx *bolt.Tx) error {
 		rootBucket := tx.Bucket([]byte(root))
@@ -194,7 +234,21 @@ func showGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) 
 func createGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
 	return func(c web.C, w http.ResponseWriter, r *http.Request) {
 		namespace := c.URLParams["namespace"]
-		content, err := verifyGif(r.Body)
+		var content []byte
+		var err error
+		switch c.URLParams["type"] {
+		case "gif":
+			content, err = verifyGif(r.Body)
+		case "link":
+			content, err = retrieveAndVerify(r.Body)
+		default:
+			response(
+				http.StatusNotAcceptable,
+				requestError{"Invalid or unspecified resource: use gif or link"},
+				c, w, r,
+			)
+			return
+		}
 
 		if err != nil {
 			response(
@@ -202,35 +256,16 @@ func createGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request
 				requestError{"Invalid Content"},
 				c, w, r,
 			)
+			return
 		}
 
 		uuid, err := genUUID()
 		if err != nil {
 			errorHandler(err, c, w, r)
+			return
 		}
-		err = db.Update(func(tx *bolt.Tx) error {
-			rootBucket := tx.Bucket([]byte(root))
-			namespacesBucket, err := rootBucket.CreateBucketIfNotExists([]byte(namespacesBucketName))
-			if err != nil {
-				return err
-			}
 
-			bucketForNamespace, err := rootBucket.CreateBucketIfNotExists([]byte(namespace))
-			if err != nil {
-				return err
-			}
-			if err = rootBucket.Put(uuid, content); err != nil {
-				return err
-			}
-			if err = bucketForNamespace.Put(uuid, []byte("{}")); err != nil {
-				return err
-			}
-			if err = namespacesBucket.Put([]byte(namespace), []byte("{}")); err != nil {
-				return err
-			}
-
-			return nil
-		})
+		err = storeGif(db, []byte(namespace), uuid, content)
 		if err != nil {
 			errorHandler(err, c, w, r)
 		} else {
@@ -238,9 +273,7 @@ func createGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request
 				http.StatusCreated, struct {
 					UUID string `json:"uuid"`
 				}{string(uuid)},
-				c,
-				w,
-				r,
+				c, w, r,
 			)
 		}
 	}
@@ -302,7 +335,7 @@ func randomNumGifs(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Req
 
 func reportGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
 	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-
+		response(http.StatusNotImplemented, requestError{"Not Implemented"}, c, w, r)
 	}
 }
 
@@ -326,10 +359,10 @@ func Register(root string, db *bolt.DB) error {
 
 	// Gif Specific
 	goji.Get(fmt.Sprintf("%s/:uuid", root), showGif(db))
-	goji.Get(fmt.Sprintf("%s/:uuid/report", root), reportGif(db))
+	goji.Delete(fmt.Sprintf("%s/:uuid/report", root), reportGif(db))
 
 	// Creation / Retrieval
-	goji.Post(fmt.Sprintf("%s/:namespace", root), createGif(db))
+	goji.Post(fmt.Sprintf("%s/:namespace/:type", root), createGif(db))
 	goji.Head(fmt.Sprintf("%s/:namespace/random", root), randomGif(db))
 	goji.Get(fmt.Sprintf("%s/:namespace/random/:count", root), randomNumGifs(db))
 	return nil
