@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -29,11 +30,25 @@ func dbConnect(name string) *bolt.DB {
 
 func setupPermissionsDb() {
 	db := dbConnect(gifsConfigDb)
+	defer db.Close()
 	for path, scope := range permissions {
 		err := setPermissions(db, path, scope)
 		if err != nil {
 			log.Fatal(err)
 		}
+	}
+	hasAdminToken, err := HasAdministratorToken(db)
+	if err != nil {
+		log.Fatal("has admin token:", err)
+	}
+
+	if !hasAdminToken {
+		opts := TokenOptions{Permissions: "admin"}
+		token, err := GenerateToken(db, opts)
+		if err != nil {
+			log.Fatal("generate token:", err)
+		}
+		fmt.Println("Administrator API Token:", token)
 	}
 }
 
