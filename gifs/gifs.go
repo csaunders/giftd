@@ -363,7 +363,7 @@ func Register(root string, db *bolt.DB) error {
 
 	// Creation / Retrieval
 	goji.Post(fmt.Sprintf("%s/:namespace/:type", root), createGif(db))
-	goji.Head(fmt.Sprintf("%s/:namespace/random", root), randomGif(db))
+	goji.Get(fmt.Sprintf("%s/:namespace/random", root), randomGif(db))
 	goji.Get(fmt.Sprintf("%s/:namespace/random/:count", root), randomNumGifs(db))
 	return nil
 }
