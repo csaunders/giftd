@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -26,6 +28,14 @@ func dbConnect(name string) *bolt.DB {
 		log.Fatal(err)
 	}
 	return db
+}
+
+func initialize() error {
+	var dataDir string
+	flag.StringVar(&dataDir, "datadir", "/var/lib/giftd", "Location where giftd data should be stored")
+	flag.Parse()
+
+	return os.Chdir(dataDir)
 }
 
 func setupPermissionsDb() {
@@ -53,6 +63,9 @@ func setupPermissionsDb() {
 }
 
 func main() {
+	if err := initialize(); err != nil {
+		log.Fatal(err)
+	}
 	setupPermissionsDb()
 	db := dbConnect("giftd.db")
 	defer db.Close()
