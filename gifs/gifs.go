@@ -184,9 +184,15 @@ func findRandomGifs(db *bolt.DB, namespace []byte, num int) ([]string, error) {
 
 func listNamespaces(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
 	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		var body interface{}
+		var body struct {
+			Categories []string `json:"categories"`
+		}
 		err := db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(root)).Bucket([]byte(namespacesBucketName))
+			if b == nil {
+				body.Categories = []string{}
+				return nil
+			}
 			stats := b.Stats()
 			c := b.Cursor()
 			results := make([]string, stats.KeyN)
@@ -197,9 +203,7 @@ func listNamespaces(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Re
 				i++
 			}
 
-			body = struct {
-				Categories []string `json:"categories"`
-			}{results}
+			body.Categories = results
 			return nil
 		})
 
@@ -311,7 +315,10 @@ func randomNumGifs(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Req
 			)
 			return
 		}
-
+		host, ok := c.Env["host"].(string)
+		if !ok {
+			host = "localhost:8000"
+		}
 		uuids, err := findRandomGifs(db, []byte(namespace), int(count))
 		paths := make([]string, len(uuids))
 		if err != nil {
@@ -319,7 +326,7 @@ func randomNumGifs(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Req
 			return
 		}
 		for i, uuid := range uuids {
-			paths[i] = fmt.Sprintf("http://localhost:8000/gifs/%s", uuid)
+			paths[i] = fmt.Sprintf("http://%s/gifs/%s", host, uuid)
 		}
 		response(
 			http.StatusOK,

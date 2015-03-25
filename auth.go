@@ -207,6 +207,11 @@ func canAccess(db *bolt.DB, path, perms string) bool {
 
 func APIAccessManagement(c *web.C, h http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
+		if c.Env["skipAuth"] != nil {
+			h.ServeHTTP(w, r)
+			return
+		}
+
 		db := dbConnect(gifsConfigDb)
 		defer db.Close()
 

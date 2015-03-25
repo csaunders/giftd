@@ -105,6 +105,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	configMiddleware, err := InitializeConfiguration("giftd.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	goji.Use(configMiddleware)
 	goji.Use(APIAccessManagement)
 	goji.Serve()
 }
