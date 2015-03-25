@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -30,11 +31,29 @@ func dbConnect(name string) *bolt.DB {
 	return db
 }
 
+func writePidfile(pidfile string) {
+	if len(pidfile) > 0 {
+		file, err := os.OpenFile(pidfile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer file.Close()
+		pid := syscall.Getpid()
+		_, err = file.Write([]byte(fmt.Sprintf("%d\n", pid)))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+}
+
 func initialize() error {
 	var dataDir string
+	var pidfile string
 	flag.StringVar(&dataDir, "datadir", "/var/lib/giftd", "Location where giftd data should be stored")
+	flag.StringVar(&pidfile, "pidfile", "", "Location to write pidfile")
 	flag.Parse()
 
+	writePidfile(pidfile)
 	return os.Chdir(dataDir)
 }
 
