@@ -46,6 +46,18 @@ func writePidfile(pidfile string) {
 	}
 }
 
+func writeAdminToken(token string) {
+	file, err := os.OpenFile("admin.token", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+	_, err = file.Write([]byte(token))
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func initialize() error {
 	var dataDir string
 	var pidfile string
@@ -77,7 +89,7 @@ func setupPermissionsDb() {
 		if err != nil {
 			log.Fatal("generate token:", err)
 		}
-		fmt.Println("Administrator API Token:", token)
+		writeAdminToken(token)
 	}
 }
 
