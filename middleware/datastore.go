@@ -45,13 +45,13 @@ func loadDatastore(a interface{}) (*store, error) {
 	var datastore *store
 	var err error
 	synchronized(func() {
-		datastore := cache[account.DatastoreName]
+		datastore := cache[account.DatastoreName()]
 		if datastore == nil {
-			db, err := bolt.Open(account.DatastoreName, 0600, &bolt.Options{Timeout: 1 * time.Second})
+			db, err := bolt.Open(account.DatastoreName(), 0600, &bolt.Options{Timeout: 1 * time.Second})
 			if err == nil {
 				datastore = &store{Db: db, Wg: new(sync.WaitGroup)}
 				datastore.Wg.Add(1)
-				go datastoreCloser(account.DatastoreName, datastore)
+				go datastoreCloser(account.DatastoreName(), datastore)
 			}
 		}
 	})

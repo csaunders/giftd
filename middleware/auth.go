@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,69 +8,26 @@ import (
 	"strings"
 
 	"github.com/boltdb/bolt"
+	"github.com/csaunders/giftd/models"
 	"github.com/zenazn/goji/web"
 )
-
-const protectedApisBucket string = "protected-apis"
 
 func deny(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusUnauthorized)
 	w.Write([]byte("Access Denied"))
 }
 
-type TokenOptions struct {
-	AccessToken string
-	Permissions string
-}
-
-func makeToken(size int) (string, error) {
-	rb := make([]byte, size)
-	_, err := rand.Read(rb)
-
-	if err != nil {
-		return "", err
-	}
-	return base64.URLEncoding.EncodeToString(rb), nil
-}
-
-func merge(a, b string) string {
-	entriesA := strings.Split(a, ",")
-	entriesB := strings.Split(b, ",")
-	results := make([]string, len(entriesA)+len(entriesB))
-	idx := 0
-	for i := 0; i < len(entriesA); i++ {
-		results[idx] = entriesA[i]
-		idx++
-	}
-	for i := 0; i < len(entriesB); i++ {
-		results[idx] = entriesB[i]
-		idx++
-	}
-	return strings.Join(results, ",")
-}
-
-func remove(subject, values string) string {
-	perms := []string{}
-	initial := strings.Split(subject, ",")
-	for _, entry := range initial {
-		if !strings.Contains(values, entry) {
-			perms = append(perms, entry)
-		}
-	}
-	return strings.Join(perms, ",")
-}
-
 func HasAdministratorToken(db *bolt.DB) (bool, error) {
 	hasAdmin := false
 	err := db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(protectedApisBucket))
+		bucket, err := models.ApiClientsBucket(tx)
 		if err != nil {
 			return err
 		}
 
-		bucket.ForEach(func(token, perms []byte) error {
-			if strings.Contains(string(perms), "admin") {
-				hasAdmin = true
+		bucket.ForEach(func(token, data []byte) error {
+			fmt.Println(string(data))
+			if hasAdmin = strings.Contains(string(data), "admin"); hasAdmin {
 				return errors.New("")
 			}
 			return nil
@@ -82,57 +37,25 @@ func HasAdministratorToken(db *bolt.DB) (bool, error) {
 	return hasAdmin, err
 }
 
-func GenerateToken(db *bolt.DB, opts TokenOptions) (string, error) {
-	token, err := makeToken(64)
-	if err != nil {
-		return token, err
-	}
-
-	err = db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
-		}
-		return bucket.Put([]byte(token), []byte(opts.Permissions))
-	})
+func generateAdministrator(db *bolt.DB) (string, error) {
+	account, err := models.NewAccount()
 	if err != nil {
 		return "", err
 	}
-	return token, nil
-}
 
-func RevokeToken(db *bolt.DB, opts TokenOptions) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
+	account.AddPermissions([]string{"admin"})
+	err = db.Update(func(tx *bolt.Tx) error {
+		bucket, err := models.ApiClientsBucket(tx)
+		if err != nil {
+			return err
 		}
-		return bucket.Delete([]byte(opts.AccessToken))
+		return models.Save(bucket, account.Token, account)
 	})
-}
 
-func GrantTokenPermissions(db *bolt.DB, opts TokenOptions) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
-		}
-		existingPerms := string(bucket.Get([]byte(opts.AccessToken)))
-		mergedPerms := merge(opts.Permissions, existingPerms)
-		return bucket.Put([]byte(opts.AccessToken), []byte(mergedPerms))
-	})
-}
-
-func RemoveTokenPermissions(db *bolt.DB, opts TokenOptions) error {
-	return db.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
-		}
-		existingPerms := string(bucket.Get([]byte(opts.AccessToken)))
-		remainingPerms := remove(existingPerms, opts.Permissions)
-		return bucket.Put([]byte(opts.AccessToken), []byte(remainingPerms))
-	})
+	if err != nil {
+		return "", err
+	}
+	return account.Token, nil
 }
 
 func SetPermissions(db *bolt.DB, path, scope string) error {
@@ -142,7 +65,7 @@ func SetPermissions(db *bolt.DB, path, scope string) error {
 	}
 
 	return db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(protectedApisBucket))
+		bucket, err := models.ApiAccessBucket(tx)
 		if err != nil {
 			return err
 		}
@@ -157,12 +80,7 @@ func CreateAdministrator(db *bolt.DB) (string, error) {
 	}
 
 	if !hasAdminToken {
-		opts := TokenOptions{Permissions: "admin"}
-		token, err := GenerateToken(db, opts)
-		if err != nil {
-			return "", err
-		}
-		return token, nil
+		return generateAdministrator(db)
 	}
 	return "", nil
 }
@@ -171,6 +89,11 @@ func hasSufficientPermissions(requiredPerms, actualPerms string) bool {
 	if strings.Contains(requiredPerms, "public") {
 		return true
 	}
+
+	if strings.Contains(requiredPerms, "admin") {
+		return true
+	}
+
 	sufficientPermissions := false
 	requiredPermsList := strings.Split(requiredPerms, ",")
 	for _, perm := range requiredPermsList {
@@ -185,9 +108,9 @@ func hasSufficientPermissions(requiredPerms, actualPerms string) bool {
 func permissionsFor(db *bolt.DB, token string) (string, error) {
 	perms := ""
 	err := db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
+		bucket, err := models.ApiClientsBucket(tx)
+		if err != nil {
+			return err
 		}
 		perms = string(bucket.Get([]byte(token)))
 		return nil
@@ -202,9 +125,9 @@ func canAccess(db *bolt.DB, path, perms string) bool {
 
 	access := false
 	db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket([]byte(protectedApisBucket))
-		if bucket == nil {
-			return nil
+		bucket, err := models.ApiAccessBucket(tx)
+		if err != nil {
+			return err
 		}
 
 		bucket.ForEach(func(pathPattern, requiredPerms []byte) error {

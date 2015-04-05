@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"encoding/json"
@@ -8,8 +8,10 @@ import (
 	"github.com/zenazn/goji/web"
 )
 
+const ConfigurationDB string = "configuration-db"
+
 func InitializeConfiguration(configPath string, configDb interface{}) (func(c *web.C, h http.Handler) http.Handler, error) {
-	config := map[string]interface{}{"configuration-db": configDb}
+	config := map[string]interface{}{ConfigurationDB: configDb}
 
 	err := updateConfiguration(config, configPath)
 	return configurationMiddleware(config), err

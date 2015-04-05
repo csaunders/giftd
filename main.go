@@ -11,6 +11,7 @@ import (
 	"github.com/boltdb/bolt"
 	"github.com/zenazn/goji"
 
+	"github.com/csaunders/giftd/admin"
 	"github.com/csaunders/giftd/gifs"
 	"github.com/csaunders/giftd/middleware"
 )
@@ -105,7 +106,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	configMiddleware, err := InitializeConfiguration(giftdConfig, confDb)
+	if err := admin.Register("/admin", db); err != nil {
+		log.Fatal(err)
+	}
+
+	configMiddleware, err := middleware.InitializeConfiguration(giftdConfig, confDb)
 	if err != nil {
 		fmt.Println(err)
 	}
