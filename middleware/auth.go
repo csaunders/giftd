@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"crypto/rand"
@@ -135,7 +135,7 @@ func RemoveTokenPermissions(db *bolt.DB, opts TokenOptions) error {
 	})
 }
 
-func setPermissions(db *bolt.DB, path, scope string) error {
+func SetPermissions(db *bolt.DB, path, scope string) error {
 	_, err := regexp.Compile(path)
 	if err != nil {
 		return err
@@ -148,6 +148,23 @@ func setPermissions(db *bolt.DB, path, scope string) error {
 		}
 		return bucket.Put([]byte(path), []byte(scope))
 	})
+}
+
+func CreateAdministrator(db *bolt.DB) (string, error) {
+	hasAdminToken, err := HasAdministratorToken(db)
+	if err != nil {
+		return "", err
+	}
+
+	if !hasAdminToken {
+		opts := TokenOptions{Permissions: "admin"}
+		token, err := GenerateToken(db, opts)
+		if err != nil {
+			return "", err
+		}
+		return token, nil
+	}
+	return "", nil
 }
 
 func hasSufficientPermissions(requiredPerms, actualPerms string) bool {
@@ -212,8 +229,12 @@ func APIAccessManagement(c *web.C, h http.Handler) http.Handler {
 			return
 		}
 
-		db := dbConnect(gifsConfigDb)
-		defer db.Close()
+		db, ok := c.Env["configuration-db"].(*bolt.DB)
+		if !ok {
+			fmt.Println("No configuration database")
+			deny(w)
+			return
+		}
 
 		accessToken := r.Header.Get("Authorization")
 		perms, err := permissionsFor(db, accessToken)

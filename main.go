@@ -12,15 +12,18 @@ import (
 	"github.com/zenazn/goji"
 
 	"github.com/csaunders/giftd/gifs"
+	"github.com/csaunders/giftd/middleware"
 )
 
 const gifsDatabase string = "giftd.db"
 const gifsConfigDb string = "giftd-config.db"
+const giftdConfig string = "giftd.json"
 
 var permissions map[string]string = map[string]string{
 	`/gifs/[a-z]+/random`:             "public",
 	`/gifs/.{8}-.{4}-.{4}-.{4}-.{12}`: "public",
 	`/gifs.*`:                         "gifs-api",
+	`/admin.*`:                        "admin-api",
 }
 
 func dbConnect(name string) *bolt.DB {
@@ -47,6 +50,9 @@ func writePidfile(pidfile string) {
 }
 
 func writeAdminToken(token string) {
+	if len(token) <= 0 {
+		return
+	}
 	file, err := os.OpenFile("admin.token", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal(err)
@@ -73,22 +79,14 @@ func setupPermissionsDb() {
 	db := dbConnect(gifsConfigDb)
 	defer db.Close()
 	for path, scope := range permissions {
-		err := setPermissions(db, path, scope)
+		err := middleware.SetPermissions(db, path, scope)
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
-	hasAdminToken, err := HasAdministratorToken(db)
-	if err != nil {
-		log.Fatal("has admin token:", err)
-	}
-
-	if !hasAdminToken {
-		opts := TokenOptions{Permissions: "admin"}
-		token, err := GenerateToken(db, opts)
-		if err != nil {
-			log.Fatal("generate token:", err)
-		}
+	if token, err := middleware.CreateAdministrator(db); err != nil {
+		log.Fatal("middleware.CreateAdministrator:", err)
+	} else {
 		writeAdminToken(token)
 	}
 }
@@ -98,19 +96,21 @@ func main() {
 		log.Fatal(err)
 	}
 	setupPermissionsDb()
-	db := dbConnect("giftd.db")
+	db := dbConnect(gifsDatabase)
 	defer db.Close()
+	confDb := dbConnect(gifsConfigDb)
+	defer confDb.Close()
 
 	if err := gifs.Register("/gifs", db); err != nil {
 		log.Fatal(err)
 	}
 
-	configMiddleware, err := InitializeConfiguration("giftd.json")
+	configMiddleware, err := InitializeConfiguration(giftdConfig, confDb)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
 	}
 
 	goji.Use(configMiddleware)
-	goji.Use(APIAccessManagement)
+	goji.Use(middleware.APIAccessManagement)
 	goji.Serve()
 }

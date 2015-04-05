@@ -8,20 +8,29 @@ import (
 	"github.com/zenazn/goji/web"
 )
 
-func InitializeConfiguration(configPath string) (func(c *web.C, h http.Handler) http.Handler, error) {
-	var config map[string]interface{}
+func InitializeConfiguration(configPath string, configDb interface{}) (func(c *web.C, h http.Handler) http.Handler, error) {
+	config := map[string]interface{}{"configuration-db": configDb}
 
+	err := updateConfiguration(config, configPath)
+	return configurationMiddleware(config), err
+}
+
+func updateConfiguration(config map[string]interface{}, configPath string) error {
 	file, err := ioutil.ReadFile(configPath)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	err = json.Unmarshal(file, &config)
+	var unmarshalled map[string]interface{}
+	err = json.Unmarshal(file, &unmarshalled)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return configurationMiddleware(config), nil
+	for key, value := range unmarshalled {
+		config[key] = value
+	}
+	return nil
 }
 
 func configurationMiddleware(config map[string]interface{}) func(c *web.C, h http.Handler) http.Handler {
