@@ -4,12 +4,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 
 	"github.com/boltdb/bolt"
 )
 
 const defaultDatastore string = "giftd.db"
 const accessTokenSize int = 32
+
+var RecordNotFound error = errors.New("record does not exist")
 
 type set map[string]bool
 
@@ -94,6 +97,14 @@ func Save(bucket *bolt.Bucket, key string, record interface{}) error {
 func Load(bucket *bolt.Bucket, key string, record interface{}) error {
 	data := bucket.Get([]byte(key))
 	return json.Unmarshal(data, record)
+}
+
+func LoadRaw(bucket *bolt.Bucket, key string) ([]byte, error) {
+	data := bucket.Get([]byte(key))
+	if data == nil {
+		return []byte{}, RecordNotFound
+	}
+	return data, nil
 }
 
 func generateToken(size int) (string, error) {
