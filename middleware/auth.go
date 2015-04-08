@@ -86,11 +86,12 @@ func CreateAdministrator(db *bolt.DB) (string, error) {
 }
 
 func hasSufficientPermissions(requiredPerms, actualPerms string) bool {
+	fmt.Println("reqd:", requiredPerms, "actual:", actualPerms)
 	if strings.Contains(requiredPerms, "public") {
 		return true
 	}
 
-	if strings.Contains(requiredPerms, "admin") {
+	if strings.Contains(actualPerms, "admin") {
 		return true
 	}
 
