@@ -9,6 +9,7 @@ import (
 
 const protectedApisBucket string = "protected-apis"
 const apiClientsBucket string = "api-clients"
+const apiClientIdsBucket string = "api-client-ids"
 
 func ApiClientsBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
 	if tx.Writable() {
@@ -20,6 +21,19 @@ func ApiClientsBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
 		}
 		return bucket, nil
 	}
+}
+
+func ApiClientIdsBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
+	if tx.Writable() {
+		return tx.CreateBucketIfNotExists([]byte(apiClientIdsBucket))
+	} else {
+		bucket := tx.Bucket([]byte(apiClientIdsBucket))
+		if bucket == nil {
+			return nil, bucketMissing(apiClientIdsBucket)
+		}
+		return bucket, nil
+	}
+
 }
 
 func ApiAccessBucket(tx *bolt.Tx) (*bolt.Bucket, error) {

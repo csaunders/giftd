@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 
 	"github.com/boltdb/bolt"
 )
@@ -47,21 +49,25 @@ func (s set) array() []string {
 }
 
 type Account struct {
+	Id          string   `json:"id"`
 	Token       string   `json:"access-token"`
 	Datastore   string   `json:"datastore"`
 	Permissions []string `json:"permissions"`
 }
 
 func NewAccount() (*Account, error) {
-	token, err := generateToken(accessTokenSize)
-	if err != nil {
+	var err error
+	account := &Account{}
+	if account.Id, err = GenUUID(); err != nil {
 		return nil, err
 	}
-	datastore, err := generateDatastoreName(accessTokenSize)
-	if err != nil {
+	if account.Token, err = generateToken(accessTokenSize); err != nil {
 		return nil, err
 	}
-	return &Account{Token: token, Datastore: datastore}, nil
+	if account.Datastore, err = generateDatastoreName(accessTokenSize); err != nil {
+		return nil, err
+	}
+	return account, nil
 }
 
 func (a *Account) DatastoreName() string {
@@ -96,7 +102,8 @@ func Save(bucket *bolt.Bucket, key string, record interface{}) error {
 
 func Load(bucket *bolt.Bucket, key string, record interface{}) error {
 	var data []byte
-	if data, err := LoadRaw(bucket, key); data != nil {
+	var err error
+	if data, err = LoadRaw(bucket, key); err != nil {
 		return err
 	}
 	return json.Unmarshal(data, record)
@@ -108,6 +115,24 @@ func LoadRaw(bucket *bolt.Bucket, key string) ([]byte, error) {
 		return []byte{}, RecordNotFound
 	}
 	return data, nil
+}
+
+func GenUUID() (string, error) {
+	urandom, err := os.OpenFile("/dev/urandom", os.O_RDONLY, 0)
+	if err != nil {
+		return "", err
+	}
+	defer urandom.Close()
+	b := make([]byte, 16)
+	n, err := urandom.Read(b)
+
+	if err != nil {
+		return "", err
+	} else if n != len(b) {
+		return "", errors.New("Could not read a sufficient number of bytes")
+	}
+	uuid := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	return uuid, nil
 }
 
 func generateToken(size int) (string, error) {

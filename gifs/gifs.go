@@ -11,11 +11,11 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 
 	"github.com/boltdb/bolt"
+	"github.com/csaunders/giftd/models"
 	"github.com/zenazn/goji"
 	"github.com/zenazn/goji/web"
 )
@@ -26,24 +26,6 @@ const namespacesBucketName string = "namespaces"
 
 type requestError struct {
 	Error string `json:"error"`
-}
-
-func genUUID() ([]byte, error) {
-	urandom, err := os.OpenFile("/dev/urandom", os.O_RDONLY, 0)
-	if err != nil {
-		return []byte{}, err
-	}
-	defer urandom.Close()
-	b := make([]byte, 16)
-	n, err := urandom.Read(b)
-
-	if err != nil {
-		return []byte{}, err
-	} else if n != len(b) {
-		return []byte{}, errors.New("Could not read a sufficient number of bytes")
-	}
-	uuid := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-	return []byte(uuid), nil
 }
 
 func verifyGif(r io.Reader) ([]byte, error) {
@@ -263,13 +245,13 @@ func createGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		uuid, err := genUUID()
+		uuid, err := models.GenUUID()
 		if err != nil {
 			errorHandler(err, c, w, r)
 			return
 		}
 
-		err = storeGif(db, []byte(namespace), uuid, content)
+		err = storeGif(db, []byte(namespace), []byte(uuid), content)
 		if err != nil {
 			errorHandler(err, c, w, r)
 		} else {

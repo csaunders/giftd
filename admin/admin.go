@@ -54,15 +54,27 @@ func findClient(db *bolt.DB, c web.C, raw bool) (models.Account, error, []byte) 
 	var account models.Account
 	var rawData []byte
 	err := db.View(func(tx *bolt.Tx) error {
-		token := c.URLParams["token"]
-		bucket, err := models.ApiClientsBucket(tx)
+		id := c.URLParams["id"]
+		idsBucket, err := models.ApiClientIdsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		token := idsBucket.Get([]byte(id))
+		if token == nil {
+			return models.RecordNotFound
+		}
+
+		clientsBucket, err := models.ApiClientsBucket(tx)
 		if err != nil {
 			return err
 		}
 		if raw {
-			rawData, err = models.LoadRaw(bucket, token)
+			rawData, err = models.LoadRaw(clientsBucket, string(token))
 		} else {
-			err = models.Load(bucket, token, &account)
+			fmt.Println(string(token))
+			err = models.Load(clientsBucket, string(token), &account)
+			fmt.Println(account)
 		}
 		return err
 	})
@@ -79,10 +91,15 @@ func modifyPermissions(db *bolt.DB, r io.Reader, account *models.Account, operat
 	}
 	operation(perms.Permissions)
 	return db.Update(func(tx *bolt.Tx) error {
+		clientIds, err := models.ApiClientIdsBucket(tx)
+		if err != nil {
+			return err
+		}
 		bucket, err := models.ApiClientsBucket(tx)
 		if err != nil {
 			return err
 		}
+		clientIds.Put([]byte(account.Id), []byte(account.Token))
 		return models.Save(bucket, account.Token, account)
 	})
 }
@@ -92,22 +109,22 @@ func listClients(c web.C, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	var clientTokens []string
+	var clientIds []string
 	err = db.View(func(tx *bolt.Tx) error {
-		clients, err := models.ApiClientsBucket(tx)
+		clients, err := models.ApiClientIdsBucket(tx)
 		if err != nil {
 			return unavailable(err, w)
 		}
 		clients.ForEach(func(key, value []byte) error {
-			clientTokens = append(clientTokens, string(key))
+			clientIds = append(clientIds, string(key))
 			return nil
 		})
 		return nil
 	})
 	if err == nil {
 		data, _ := json.Marshal(struct {
-			Tokens []string `json:"tokens"`
-		}{clientTokens})
+			Ids []string `json:"ids"`
+		}{clientIds})
 		w.Write(data)
 	}
 }
@@ -118,11 +135,14 @@ func showClient(c web.C, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err, clientAccount := findClient(db, c, true)
-	if err != nil {
+	switch err {
+	case nil:
+		w.Write(clientAccount)
+	case models.RecordNotFound:
+		notFound(w)
+	default:
 		unavailable(err, w)
-		return
 	}
-	w.Write(clientAccount)
 }
 
 func addPermissions(c web.C, w http.ResponseWriter, r *http.Request) {
@@ -191,15 +211,21 @@ func revokeClient(c web.C, w http.ResponseWriter, r *http.Request) {
 	client, err, _ := findClient(db, c, false)
 	if err == nil {
 		err = db.Update(func(tx *bolt.Tx) error {
+			idsBucket, err := models.ApiClientIdsBucket(tx)
+			if err != nil {
+				return err
+			}
 			accounts, err := models.ApiClientsBucket(tx)
+			if err != nil {
+				return err
+			}
+			err = idsBucket.Delete([]byte(client.Id))
 			if err != nil {
 				return err
 			}
 			return accounts.Delete([]byte(client.Token))
 		})
 	}
-
-	fmt.Println(err)
 
 	switch err {
 	case nil:
@@ -215,9 +241,9 @@ func revokeClient(c web.C, w http.ResponseWriter, r *http.Request) {
 func Register(root string, db *bolt.DB) error {
 	goji.Get(fmt.Sprintf("%s/accounts", root), listClients)
 	goji.Post(fmt.Sprintf("%s/accounts", root), createClient)
-	goji.Get(fmt.Sprintf("%s/accounts/:token", root), showClient)
-	goji.Post(fmt.Sprintf("%s/accounts/:token/permissions", root), addPermissions)
-	goji.Delete(fmt.Sprintf("%s/accounts/:token/permissions", root), removePermissions)
-	goji.Delete(fmt.Sprintf("%s/accounts/:token", root), revokeClient)
+	goji.Get(fmt.Sprintf("%s/accounts/:id", root), showClient)
+	goji.Post(fmt.Sprintf("%s/accounts/:id/permissions", root), addPermissions)
+	goji.Delete(fmt.Sprintf("%s/accounts/:id/permissions", root), removePermissions)
+	goji.Delete(fmt.Sprintf("%s/accounts/:id", root), revokeClient)
 	return nil
 }
