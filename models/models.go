@@ -95,7 +95,10 @@ func Save(bucket *bolt.Bucket, key string, record interface{}) error {
 }
 
 func Load(bucket *bolt.Bucket, key string, record interface{}) error {
-	data := bucket.Get([]byte(key))
+	var data []byte
+	if data, err := LoadRaw(bucket, key); data != nil {
+		return err
+	}
 	return json.Unmarshal(data, record)
 }
 

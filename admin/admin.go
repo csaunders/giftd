@@ -165,12 +165,59 @@ func removePermissions(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func createClient(c web.C, w http.ResponseWriter, r *http.Request) {
+	db, err := retrieveDb(c, w)
+	if err != nil {
+		return
+	}
+	client, err := models.NewAccount()
+	if err == nil {
+		err = modifyPermissions(db, r.Body, client, client.AddPermissions)
+	}
+	if err != nil {
+		unavailable(err, w)
+		return
+	}
+
+	bytes, _ := json.Marshal(client)
+	w.Write(bytes)
+}
+
+func revokeClient(c web.C, w http.ResponseWriter, r *http.Request) {
+	db, err := retrieveDb(c, w)
+	if err != nil {
+		return
+	}
+	client, err, _ := findClient(db, c, false)
+	if err == nil {
+		err = db.Update(func(tx *bolt.Tx) error {
+			accounts, err := models.ApiClientsBucket(tx)
+			if err != nil {
+				return err
+			}
+			return accounts.Delete([]byte(client.Token))
+		})
+	}
+
+	fmt.Println(err)
+
+	switch err {
+	case nil:
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(""))
+	case models.RecordNotFound:
+		notFound(w)
+	default:
+		unavailable(err, w)
+	}
+}
+
 func Register(root string, db *bolt.DB) error {
-	goji.Get(fmt.Sprintf("%s", root), listClients)
-	// goji.Post(fmt.Sprintf("%s", root), createClient)
-	goji.Get(fmt.Sprintf("%s/:token", root), showClient)
-	goji.Post(fmt.Sprintf("%s/:token/permissions", root), addPermissions)
-	goji.Delete(fmt.Sprintf("%s/:token/permissions", root), removePermissions)
-	// goji.Delete(fmt.Sprintf("%s/:token", root), revokeClient)
+	goji.Get(fmt.Sprintf("%s/accounts", root), listClients)
+	goji.Post(fmt.Sprintf("%s/accounts", root), createClient)
+	goji.Get(fmt.Sprintf("%s/accounts/:token", root), showClient)
+	goji.Post(fmt.Sprintf("%s/accounts/:token/permissions", root), addPermissions)
+	goji.Delete(fmt.Sprintf("%s/accounts/:token/permissions", root), removePermissions)
+	goji.Delete(fmt.Sprintf("%s/accounts/:token", root), revokeClient)
 	return nil
 }
