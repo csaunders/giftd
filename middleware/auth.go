@@ -146,6 +146,21 @@ func canAccess(db *bolt.DB, path, perms string) bool {
 	return access
 }
 
+func loadAccount(db *bolt.DB, token string, c *web.C) {
+	db.View(func(tx *bolt.Tx) error {
+		var account models.Account
+		bucket, err := models.ApiClientsBucket(tx)
+		if err != nil {
+			return err
+		}
+		if err = models.Load(bucket, token, &account); err != nil {
+			return err
+		}
+		c.Env[accountDetails] = account
+		return nil
+	})
+}
+
 func APIAccessManagement(c *web.C, h http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		if c.Env["skipAuth"] != nil {
@@ -170,6 +185,7 @@ func APIAccessManagement(c *web.C, h http.Handler) http.Handler {
 
 		if canAccess(db, r.URL.Path, perms) {
 			fmt.Println("Access Granted for", r.URL.Path)
+			loadAccount(db, accessToken, c)
 			h.ServeHTTP(w, r)
 			return
 		}

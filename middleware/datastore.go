@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type store struct {
 func datastoreCloser(name string, datastore *store) {
 	datastore.Wg.Wait()
 	synchronized(func() {
+		fmt.Println("Closing database and clearing from cache")
 		datastore.Db.Close()
 		delete(cache, name)
 	})
@@ -45,17 +47,25 @@ func loadDatastore(a interface{}) (*store, error) {
 	var datastore *store
 	var err error
 	synchronized(func() {
-		datastore := cache[account.DatastoreName()]
+		datastore = cache[account.DatastoreName()]
+		fmt.Println("cache datastore:", datastore)
 		if datastore == nil {
 			db, err := bolt.Open(account.DatastoreName(), 0600, &bolt.Options{Timeout: 1 * time.Second})
 			if err == nil {
-				datastore = &store{Db: db, Wg: new(sync.WaitGroup)}
+				datastore = &store{}
+				datastore.Db = db
+				datastore.Wg = new(sync.WaitGroup)
 				datastore.Wg.Add(1)
-				go datastoreCloser(account.DatastoreName(), datastore)
+				fmt.Println("sync datastore:", datastore)
+				// go datastoreCloser(account.DatastoreName(), datastore)
 			}
+		} else {
+			fmt.Println("Incrementing cache counter for:", datastore)
+			datastore.Wg.Add(1)
 		}
 	})
 
+	fmt.Println("unsync datastore:", datastore)
 	return datastore, err
 }
 

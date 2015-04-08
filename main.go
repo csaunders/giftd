@@ -117,5 +117,6 @@ func main() {
 
 	goji.Use(configMiddleware)
 	goji.Use(middleware.APIAccessManagement)
+	goji.Use(middleware.DatastoreLoader)
 	goji.Serve()
 }
