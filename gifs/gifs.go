@@ -15,6 +15,7 @@ import (
 	"strconv"
 
 	"github.com/boltdb/bolt"
+	"github.com/csaunders/giftd/middleware"
 	"github.com/csaunders/giftd/models"
 	"github.com/zenazn/goji"
 	"github.com/zenazn/goji/web"
@@ -164,168 +165,156 @@ func findRandomGifs(db *bolt.DB, namespace []byte, num int) ([]string, error) {
 	return uuids, err
 }
 
-func listNamespaces(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Categories []string `json:"categories"`
-		}
-		err := db.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(root)).Bucket([]byte(namespacesBucketName))
-			if b == nil {
-				body.Categories = []string{}
-				return nil
-			}
-			stats := b.Stats()
-			c := b.Cursor()
-			results := make([]string, stats.KeyN)
-			i := 0
-
-			for k, _ := c.First(); k != nil; k, _ = c.Next() {
-				results[i] = string(k)
-				i++
-			}
-
-			body.Categories = results
+func listNamespaces(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Categories []string `json:"categories"`
+	}
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(root)).Bucket([]byte(namespacesBucketName))
+		if b == nil {
+			body.Categories = []string{}
 			return nil
-		})
-
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
 		}
-		response(http.StatusOK, body, c, w, r)
+		stats := b.Stats()
+		c := b.Cursor()
+		results := make([]string, stats.KeyN)
+		i := 0
+
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			results[i] = string(k)
+			i++
+		}
+
+		body.Categories = results
+		return nil
+	})
+
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
 	}
+	response(http.StatusOK, body, c, w, r)
 }
 
-func showGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		uuid := c.URLParams["uuid"]
-		var content []byte
-		err := db.View(func(tx *bolt.Tx) error {
-			content = tx.Bucket([]byte(root)).Get([]byte(uuid))
-			return nil
-		})
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
-		} else if len(content) <= 0 {
-			notFound(fmt.Sprintf("%s does not exist", uuid), c, w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "image/gif")
-		w.Write(content)
+func showGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	uuid := c.URLParams["uuid"]
+	var content []byte
+	err := db.View(func(tx *bolt.Tx) error {
+		content = tx.Bucket([]byte(root)).Get([]byte(uuid))
+		return nil
+	})
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
+	} else if len(content) <= 0 {
+		notFound(fmt.Sprintf("%s does not exist", uuid), c, w, r)
+		return
 	}
+	w.Header().Set("Content-Type", "image/gif")
+	w.Write(content)
 }
 
-func createGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		namespace := c.URLParams["namespace"]
-		var content []byte
-		var err error
-		switch c.URLParams["type"] {
-		case "gif":
-			content, err = verifyGif(r.Body)
-		case "link":
-			content, err = retrieveAndVerify(r.Body)
-		default:
-			response(
-				http.StatusNotAcceptable,
-				requestError{"Invalid or unspecified resource: use gif or link"},
-				c, w, r,
-			)
-			return
-		}
-
-		if err != nil {
-			response(
-				http.StatusUnsupportedMediaType,
-				requestError{"Invalid Content"},
-				c, w, r,
-			)
-			return
-		}
-
-		uuid, err := models.GenUUID()
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
-		}
-
-		err = storeGif(db, []byte(namespace), []byte(uuid), content)
-		if err != nil {
-			errorHandler(err, c, w, r)
-		} else {
-			response(
-				http.StatusCreated, struct {
-					UUID string `json:"uuid"`
-				}{string(uuid)},
-				c, w, r,
-			)
-		}
-	}
-}
-
-func randomGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		namespace := c.URLParams["namespace"]
-		uuids, err := findRandomGifs(db, []byte(namespace), 1)
-
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
-		}
-		http.Redirect(w, r, fmt.Sprintf("/gifs/%s", string(uuids[0])), http.StatusTemporaryRedirect)
-	}
-}
-
-func randomNumGifs(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		namespace := c.URLParams["namespace"]
-		count, err := strconv.ParseInt(c.URLParams["count"], 10, 64)
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
-		}
-
-		if int(count) > maxRandGif {
-			response(
-				http.StatusNotAcceptable,
-				requestError{fmt.Sprintf("Request exceeds maximum random gif count of %d", maxRandGif)},
-				c,
-				w,
-				r,
-			)
-			return
-		}
-		host, ok := c.Env["host"].(string)
-		if !ok {
-			host = "localhost:8000"
-		}
-		uuids, err := findRandomGifs(db, []byte(namespace), int(count))
-		paths := make([]string, len(uuids))
-		if err != nil {
-			errorHandler(err, c, w, r)
-			return
-		}
-		for i, uuid := range uuids {
-			paths[i] = fmt.Sprintf("http://%s/gifs/%s", host, uuid)
-		}
+func createGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	namespace := c.URLParams["namespace"]
+	var content []byte
+	var err error
+	switch c.URLParams["type"] {
+	case "gif":
+		content, err = verifyGif(r.Body)
+	case "link":
+		content, err = retrieveAndVerify(r.Body)
+	default:
 		response(
-			http.StatusOK,
-			struct {
-				Locations []string `json:"locations"`
-			}{paths},
-			c,
-			w,
-			r,
+			http.StatusNotAcceptable,
+			requestError{"Invalid or unspecified resource: use gif or link"},
+			c, w, r,
+		)
+		return
+	}
+
+	if err != nil {
+		response(
+			http.StatusUnsupportedMediaType,
+			requestError{"Invalid Content"},
+			c, w, r,
+		)
+		return
+	}
+
+	uuid, err := models.GenUUID()
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
+	}
+
+	err = storeGif(db, []byte(namespace), []byte(uuid), content)
+	if err != nil {
+		errorHandler(err, c, w, r)
+	} else {
+		response(
+			http.StatusCreated, struct {
+				UUID string `json:"uuid"`
+			}{string(uuid)},
+			c, w, r,
 		)
 	}
 }
 
-func reportGif(db *bolt.DB) func(c web.C, w http.ResponseWriter, r *http.Request) {
-	return func(c web.C, w http.ResponseWriter, r *http.Request) {
-		response(http.StatusNotImplemented, requestError{"Not Implemented"}, c, w, r)
+func randomGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	namespace := c.URLParams["namespace"]
+	uuids, err := findRandomGifs(db, []byte(namespace), 1)
+
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
 	}
+	http.Redirect(w, r, fmt.Sprintf("/gifs/%s", string(uuids[0])), http.StatusTemporaryRedirect)
+}
+
+func randomNumGifs(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	namespace := c.URLParams["namespace"]
+	count, err := strconv.ParseInt(c.URLParams["count"], 10, 64)
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
+	}
+
+	if int(count) > maxRandGif {
+		response(
+			http.StatusNotAcceptable,
+			requestError{fmt.Sprintf("Request exceeds maximum random gif count of %d", maxRandGif)},
+			c,
+			w,
+			r,
+		)
+		return
+	}
+	host, ok := c.Env["host"].(string)
+	if !ok {
+		host = "localhost:8000"
+	}
+	uuids, err := findRandomGifs(db, []byte(namespace), int(count))
+	paths := make([]string, len(uuids))
+	if err != nil {
+		errorHandler(err, c, w, r)
+		return
+	}
+	for i, uuid := range uuids {
+		paths[i] = fmt.Sprintf("http://%s/gifs/%s", host, uuid)
+	}
+	response(
+		http.StatusOK,
+		struct {
+			Locations []string `json:"locations"`
+		}{paths},
+		c,
+		w,
+		r,
+	)
+}
+
+func reportGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
+	response(http.StatusNotImplemented, requestError{"Not Implemented"}, c, w, r)
 }
 
 func createBucket(db *bolt.DB) error {
@@ -338,21 +327,15 @@ func createBucket(db *bolt.DB) error {
 	})
 }
 
-func Register(root string, db *bolt.DB) error {
-	err := createBucket(db)
-	if err != nil {
-		return err
-	}
-
-	goji.Get(fmt.Sprintf("%s", root), listNamespaces(db))
+func Register(root string, provider middleware.DatabaseProvider) {
+	goji.Get(fmt.Sprintf("%s", root), provider(createBucket, listNamespaces))
 
 	// Gif Specific
-	goji.Get(fmt.Sprintf("%s/:uuid", root), showGif(db))
-	goji.Delete(fmt.Sprintf("%s/:uuid/report", root), reportGif(db))
+	goji.Get(fmt.Sprintf("%s/:uuid", root), provider(createBucket, showGif))
+	goji.Delete(fmt.Sprintf("%s/:uuid/report", root), provider(createBucket, reportGif))
 
 	// Creation / Retrieval
-	goji.Post(fmt.Sprintf("%s/:namespace/:type", root), createGif(db))
-	goji.Get(fmt.Sprintf("%s/:namespace/random", root), randomGif(db))
-	goji.Get(fmt.Sprintf("%s/:namespace/random/:count", root), randomNumGifs(db))
-	return nil
+	goji.Post(fmt.Sprintf("%s/:namespace/:type", root), provider(createBucket, createGif))
+	goji.Get(fmt.Sprintf("%s/:namespace/random", root), provider(createBucket, randomGif))
+	goji.Get(fmt.Sprintf("%s/:namespace/random/:count", root), provider(createBucket, randomNumGifs))
 }

@@ -97,18 +97,11 @@ func main() {
 		log.Fatal(err)
 	}
 	setupPermissionsDb()
-	db := dbConnect(gifsDatabase)
-	defer db.Close()
 	confDb := dbConnect(gifsConfigDb)
 	defer confDb.Close()
 
-	if err := gifs.Register("/gifs", db); err != nil {
-		log.Fatal(err)
-	}
-
-	if err := admin.Register("/admin", db); err != nil {
-		log.Fatal(err)
-	}
+	gifs.Register("/gifs", middleware.EnvironmentDatabaseProvider)
+	admin.Register("/admin")
 
 	configMiddleware, err := middleware.InitializeConfiguration(giftdConfig, confDb)
 	if err != nil {

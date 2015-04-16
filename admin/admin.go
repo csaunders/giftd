@@ -72,9 +72,7 @@ func findClient(db *bolt.DB, c web.C, raw bool) (models.Account, error, []byte) 
 		if raw {
 			rawData, err = models.LoadRaw(clientsBucket, string(token))
 		} else {
-			fmt.Println(string(token))
 			err = models.Load(clientsBucket, string(token), &account)
-			fmt.Println(account)
 		}
 		return err
 	})
@@ -109,7 +107,7 @@ func listClients(c web.C, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	var clientIds []string
+	clientIds := []string{}
 	err = db.View(func(tx *bolt.Tx) error {
 		clients, err := models.ApiClientIdsBucket(tx)
 		if err != nil {
@@ -238,12 +236,11 @@ func revokeClient(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func Register(root string, db *bolt.DB) error {
+func Register(root string) {
 	goji.Get(fmt.Sprintf("%s/accounts", root), listClients)
 	goji.Post(fmt.Sprintf("%s/accounts", root), createClient)
 	goji.Get(fmt.Sprintf("%s/accounts/:id", root), showClient)
 	goji.Post(fmt.Sprintf("%s/accounts/:id/permissions", root), addPermissions)
 	goji.Delete(fmt.Sprintf("%s/accounts/:id/permissions", root), removePermissions)
 	goji.Delete(fmt.Sprintf("%s/accounts/:id", root), revokeClient)
-	return nil
 }
