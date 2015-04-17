@@ -77,6 +77,18 @@ func (a *Account) DatastoreName() string {
 	return a.Datastore
 }
 
+func (a *Account) SetPermissions(perms []string) {
+	if len(perms) > 0 {
+		a.Permissions = perms
+	}
+}
+
+func (a *Account) SetDatastore(datastore string) {
+	if len(datastore) > 0 {
+		a.Datastore = datastore
+	}
+}
+
 func (a *Account) AddPermissions(perms []string) {
 	set := make(set).add(a.Permissions).add(perms)
 	a.Permissions = set.array()

@@ -79,15 +79,7 @@ func findClient(db *bolt.DB, c web.C, raw bool) (models.Account, error, []byte) 
 	return account, err, rawData
 }
 
-func modifyPermissions(db *bolt.DB, r io.Reader, account *models.Account, operation func([]string)) error {
-	var perms struct {
-		Permissions []string `json:"permissions"`
-	}
-	err := json.NewDecoder(r).Decode(&perms)
-	if err != nil {
-		return err
-	}
-	operation(perms.Permissions)
+func saveClient(db *bolt.DB, client *models.Account) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		clientIds, err := models.ApiClientIdsBucket(tx)
 		if err != nil {
@@ -97,9 +89,22 @@ func modifyPermissions(db *bolt.DB, r io.Reader, account *models.Account, operat
 		if err != nil {
 			return err
 		}
-		clientIds.Put([]byte(account.Id), []byte(account.Token))
-		return models.Save(bucket, account.Token, account)
+
+		clientIds.Put([]byte(client.Id), []byte(client.Token))
+		return models.Save(bucket, client.Token, client)
 	})
+}
+
+func modifyPermissions(db *bolt.DB, r io.Reader, account *models.Account, operation func([]string)) error {
+	var perms struct {
+		Permissions []string `json:"permissions"`
+	}
+	err := json.NewDecoder(r).Decode(&perms)
+	if err != nil {
+		return err
+	}
+	operation(perms.Permissions)
+	return saveClient(db, account)
 }
 
 func listClients(c web.C, w http.ResponseWriter, r *http.Request) {
@@ -140,6 +145,32 @@ func showClient(c web.C, w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 	default:
 		unavailable(err, w)
+	}
+}
+
+func updateClient(c web.C, w http.ResponseWriter, r *http.Request) {
+	db, err := retrieveDb(c, w)
+	if err != nil {
+		return
+	}
+	client, err, _ := findClient(db, c, false)
+	if err == nil {
+		params := struct {
+			Datastore   string   `json:"datastore"`
+			Permissions []string `json:"permissions"`
+		}{}
+		if err = json.NewDecoder(r.Body).Decode(&params); err == nil {
+			client.SetDatastore(params.Datastore)
+			client.SetPermissions(params.Permissions)
+			err = saveClient(db, &client)
+		}
+	}
+	if err == nil {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(""))
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(err.Error()))
 	}
 }
 
@@ -240,6 +271,7 @@ func Register(root string) {
 	goji.Get(fmt.Sprintf("%s/accounts", root), listClients)
 	goji.Post(fmt.Sprintf("%s/accounts", root), createClient)
 	goji.Get(fmt.Sprintf("%s/accounts/:id", root), showClient)
+	goji.Put(fmt.Sprintf("%s/accounts/:id", root), updateClient)
 	goji.Post(fmt.Sprintf("%s/accounts/:id/permissions", root), addPermissions)
 	goji.Delete(fmt.Sprintf("%s/accounts/:id/permissions", root), removePermissions)
 	goji.Delete(fmt.Sprintf("%s/accounts/:id", root), revokeClient)
