@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 
@@ -12,7 +14,14 @@ import (
 )
 
 const Datastore string = "datastore"
-const accountDetails string = "account-details"
+const AccountDetails string = "account-details"
+const AccountId string = "account_id"
+
+const sels string = "[0-9a-f]"
+
+var pattern string = fmt.Sprintf("%s{8}-%s{4}-%s{4}-%s{4}-%s{12}", sels, sels, sels, sels, sels)
+
+var pathPattern *regexp.Regexp = regexp.MustCompile(pattern)
 
 var cache map[string]*store = map[string]*store{}
 
@@ -39,24 +48,20 @@ func datastoreCloser(name string, datastore *store) {
 	})
 }
 
-func loadDatastore(a interface{}) (*store, error) {
-	account, ok := a.(models.Account)
-	if !ok {
-		return nil, errors.New("Invalid Account Information")
-	}
+func openDatastore(name string) (*store, error) {
 	var datastore *store
 	var err error
 	synchronized(func() {
-		datastore = cache[account.DatastoreName()]
+		datastore = cache[name]
 		if datastore == nil {
-			db, err := bolt.Open(account.DatastoreName(), 0600, &bolt.Options{Timeout: 1 * time.Second})
+			db, err := bolt.Open(name, 0600, &bolt.Options{Timeout: 1 * time.Second})
 			if err == nil {
 				datastore = &store{}
 				datastore.Db = db
 				datastore.Wg = new(sync.WaitGroup)
 				datastore.Wg.Add(1)
-				cache[account.DatastoreName()] = datastore
-				go datastoreCloser(account.DatastoreName(), datastore)
+				cache[name] = datastore
+				go datastoreCloser(name, datastore)
 			}
 		} else {
 			datastore.Wg.Add(1)
@@ -66,13 +71,72 @@ func loadDatastore(a interface{}) (*store, error) {
 	return datastore, err
 }
 
+func datastoreNameFromEnv(c *web.C) (string, error) {
+	account, ok := c.Env[AccountDetails].(models.Account)
+	if !ok {
+		return "", errors.New("No Account Information")
+	}
+	return account.DatastoreName(), nil
+}
+
+func datastoreNameFromPath(c *web.C, path string) (string, error) {
+	var account models.Account
+	var db *bolt.DB
+	var ok bool
+	if db, ok = c.Env[ConfigurationDB].(*bolt.DB); !ok {
+		return "", errors.New("Cannot load configuration database")
+	}
+	err := db.View(func(tx *bolt.Tx) error {
+		idsBucket, err := models.ApiClientIdsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		uuids := pathPattern.FindAllString(path, -1)
+		if uuids == nil {
+			return errors.New("Cannot load database for path")
+		}
+
+		var token []byte
+		for _, uuid := range uuids {
+			if token = idsBucket.Get([]byte(uuid)); token != nil {
+				break
+			}
+		}
+
+		if token == nil {
+			return models.RecordNotFound
+		}
+
+		clientsBucket, err := models.ApiClientsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		return models.Load(clientsBucket, string(token), &account)
+	})
+
+	return account.DatastoreName(), err
+}
+
+func loadDatastore(c *web.C, r *http.Request) (*store, error) {
+	var name string
+	var err error
+	if name, err = datastoreNameFromEnv(c); err != nil {
+		if name, err = datastoreNameFromPath(c, r.URL.Path); err != nil {
+			return nil, errors.New("loadDatastore: could not find datastore")
+		}
+	}
+	return openDatastore(name)
+}
+
 func unloadDatastore(datastore *store) {
 	datastore.Wg.Done()
 }
 
 func DatastoreLoader(c *web.C, h http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
-		datastore, err := loadDatastore(c.Env[accountDetails])
+		datastore, err := loadDatastore(c, r)
 		if err == nil {
 			defer unloadDatastore(datastore)
 			c.Env[Datastore] = datastore.Db
@@ -81,6 +145,7 @@ func DatastoreLoader(c *web.C, h http.Handler) http.Handler {
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte("It's not you, it's us."))
+			w.Write([]byte(err.Error()))
 		}
 	}
 	return http.HandlerFunc(fn)

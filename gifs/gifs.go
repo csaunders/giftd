@@ -262,13 +262,14 @@ func createGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
 
 func randomGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
 	namespace := c.URLParams["namespace"]
+	account, _ := c.Env[middleware.AccountDetails].(models.Account)
 	uuids, err := findRandomGifs(db, []byte(namespace), 1)
 
 	if err != nil {
 		errorHandler(err, c, w, r)
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/gifs/%s", string(uuids[0])), http.StatusTemporaryRedirect)
+	http.Redirect(w, r, fmt.Sprintf("/gifs/%s/%s", account.Id, string(uuids[0])), http.StatusTemporaryRedirect)
 }
 
 func randomNumGifs(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
@@ -330,12 +331,12 @@ func createBucket(db *bolt.DB) error {
 func Register(root string, provider middleware.DatabaseProvider) {
 	goji.Get(fmt.Sprintf("%s", root), provider(createBucket, listNamespaces))
 
-	// Gif Specific
-	goji.Get(fmt.Sprintf("%s/:uuid", root), provider(createBucket, showGif))
-	goji.Delete(fmt.Sprintf("%s/:uuid/report", root), provider(createBucket, reportGif))
-
 	// Creation / Retrieval
 	goji.Post(fmt.Sprintf("%s/:namespace/:type", root), provider(createBucket, createGif))
 	goji.Get(fmt.Sprintf("%s/:namespace/random", root), provider(createBucket, randomGif))
 	goji.Get(fmt.Sprintf("%s/:namespace/random/:count", root), provider(createBucket, randomNumGifs))
+
+	// Gif Specific
+	goji.Get(fmt.Sprintf("%s/:account_id/:uuid", root), provider(createBucket, showGif))
+	goji.Delete(fmt.Sprintf("%s/:account_id/:uuid/report", root), provider(createBucket, reportGif))
 }

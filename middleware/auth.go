@@ -156,7 +156,7 @@ func loadAccount(db *bolt.DB, token string, c *web.C) {
 		if err = models.Load(bucket, token, &account); err != nil {
 			return err
 		}
-		c.Env[accountDetails] = account
+		c.Env[AccountDetails] = account
 		return nil
 	})
 }
