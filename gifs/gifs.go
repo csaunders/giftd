@@ -274,6 +274,7 @@ func randomGif(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
 
 func randomNumGifs(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request) {
 	namespace := c.URLParams["namespace"]
+	account, _ := c.Env[middleware.AccountDetails].(models.Account)
 	count, err := strconv.ParseInt(c.URLParams["count"], 10, 64)
 	if err != nil {
 		errorHandler(err, c, w, r)
@@ -301,7 +302,7 @@ func randomNumGifs(db *bolt.DB, c web.C, w http.ResponseWriter, r *http.Request)
 		return
 	}
 	for i, uuid := range uuids {
-		paths[i] = fmt.Sprintf("http://%s/gifs/%s", host, uuid)
+		paths[i] = fmt.Sprintf("http://%s/gifs/%s/%s", host, account.Id, uuid)
 	}
 	response(
 		http.StatusOK,

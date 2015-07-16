@@ -11,6 +11,23 @@ const protectedApisBucket string = "protected-apis"
 const apiClientsBucket string = "api-clients"
 const apiClientIdsBucket string = "api-client-ids"
 
+func dump(header string, c *bolt.Cursor) {
+	fmt.Println("----------", header, "----------")
+	printer := func(k, v []byte) bool {
+		if k == nil {
+			return false
+		}
+		fmt.Println(string(k), "------>", string(v))
+		return true
+	}
+	printer(c.First())
+	for true {
+		if printer(c.Next()) == false {
+			break
+		}
+	}
+}
+
 func ApiClientsBucket(tx *bolt.Tx) (*bolt.Bucket, error) {
 	if tx.Writable() {
 		return tx.CreateBucketIfNotExists([]byte(apiClientsBucket))

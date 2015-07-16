@@ -267,9 +267,47 @@ func revokeClient(c web.C, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func syncIds(c web.C, w http.ResponseWriter, r *http.Request) {
+	var db *bolt.DB
+	var ok bool
+	if db, ok = c.Env[middleware.ConfigurationDB].(*bolt.DB); !ok {
+		unavailable(errors.New("Cannot load configuration database"), w)
+		return
+	}
+	db.Update(func(tx *bolt.Tx) error {
+		clientsBucket, _ := models.ApiClientsBucket(tx)
+		idsBucket, _ := models.ApiClientIdsBucket(tx)
+		sync := func(token, record []byte) bool {
+			if token == nil {
+				return false
+			}
+			var client models.Account
+			if err := json.Unmarshal(record, &client); err != nil {
+				return false
+			}
+			fmt.Println(client.Id, "----->", client.Token)
+			if err := idsBucket.Put([]byte(client.Id), []byte(client.Token)); err != nil {
+				fmt.Println(err)
+			}
+
+			return true
+		}
+		cursor := clientsBucket.Cursor()
+		fmt.Println("Synchronizing...")
+		processing := sync(cursor.First())
+		for processing {
+			processing = sync(cursor.Next())
+		}
+		return nil
+	})
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(""))
+}
+
 func Register(root string) {
 	goji.Get(fmt.Sprintf("%s/accounts", root), listClients)
 	goji.Post(fmt.Sprintf("%s/accounts", root), createClient)
+	goji.Post(fmt.Sprintf("%s/accounts/sync", root), syncIds)
 	goji.Get(fmt.Sprintf("%s/accounts/:id", root), showClient)
 	goji.Put(fmt.Sprintf("%s/accounts/:id", root), updateClient)
 	goji.Post(fmt.Sprintf("%s/accounts/:id/permissions", root), addPermissions)
